@@ -60,6 +60,360 @@ async function decryptMessage(encryptedData, password) {
     return decoder.decode(decrypted);
 }
 
+// Регистрация
+document.getElementById('registerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const username = document.getElementById('regUsername').value.trim();
+    const password = document.getElementById('regPassword').value;
+    const confirm = document.getElementById('regConfirmPassword').value;
+    
+    if (!username || !password) {
+        document.getElementById('regError').textContent = 'Заполните все поля';
+        return;
+    }
+    
+    if (password !== confirm) {
+        document.getElementById('regError').textContent = 'Пароли не совпадают';
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, publicKey: '' })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('✅ Регистрация успешна! Теперь войдите');
+            document.querySelector('[data-tab="login"]').click();
+            document.getElementById('regError').textContent = '';
+        } else {
+            document.getElementById('regError').textContent = data.error;
+        }
+    } catch (error) {
+        document.getElementById('regError').textContent = 'Ошибка соединения с сервером';
+    }
+});
+
+// Вход
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    
+    if (!username || !password) {
+        document.getElementById('loginError').textContent = 'Заполните все поля';
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            currentUser = data.user;
+            currentUser.password = password;
+            
+            // Подключаем WebSocket
+            connectWebSocket();
+            
+            // Загружаем список пользователей
+            await loadUsers();
+            
+            // Показываем интерфейс мессенджера
+            document.getElementById('authScreen').style.display = 'none';
+            document.getElementById('messengerScreen').style.display = 'flex';
+            document.getElementById('currentUsername').textContent = currentUser.username;
+        } else {
+            document.getElementById('loginError').textContent = data.error;
+        }
+    } catch (error) {
+        document.getElementById('loginError').textContent = 'Ошибка соединения с сервером';
+    }
+});
+
+// Подключение WebSocket
+function connectWebSocket() {
+    socket = io();
+    
+    socket.on('connect', () => {
+        console.log('✅ WebSocket подключен');
+        socket.emit('register-user', currentUser.username);
+    });
+    
+    socket.on('new-message', async (data) => {
+        console.log('📩 Новое сообщение от:', data.from);
+        try {
+            const decrypted = await decryptMessage(
+                {
+                    encrypted: data.encryptedContent,
+                    iv: data.iv,
+                    salt: new Uint8Array(32)
+                },
+                currentUser.password
+            );
+            
+            if (activeChat === data.from) {
+                displayMessage(data.from, decrypted, false);
+            }
+            
+            // Подсвечиваем непрочитанное
+            const userItem = document.querySelector(`.user-item[data-username="${data.from}"]`);
+            if (userItem && activeChat !== data.from) {
+                userItem.style.fontWeight = 'bold';
+            }
+        } catch (error) {
+            console.error('Ошибка расшифровки:', error);
+        }
+    });
+    
+    socket.on('user-online', (username) => {
+        updateUserStatus(username, true);
+    });
+    
+    socket.on('user-offline', (username) => {
+        updateUserStatus(username, false);
+    });
+    
+    socket.on('message-sent', (data) => {
+        console.log('✅ Сообщение отправлено:', data);
+    });
+}
+
+// Загрузка списка пользователей
+async function loadUsers() {
+    try {
+        const response = await fetch(`/api/users/${currentUser.username}`);
+        usersList = await response.json();
+        
+        const usersListDiv = document.getElementById('usersList');
+        if (usersList.length === 0) {
+            usersListDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #6c7883;">👥 Пока нет других пользователей<br>Пригласи друга зарегистрироваться</div>';
+            return;
+        }
+        
+        usersListDiv.innerHTML = usersList.map(user => `
+            <div class="user-item" data-username="${user.username}">
+                <div class="user-status"></div>
+                <span>${escapeHtml(user.username)}</span>
+            </div>
+        `).join('');
+        
+        // Добавляем обработчики кликов
+        document.querySelectorAll('.user-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const username = el.dataset.username;
+                openChat(username);
+            });
+        });
+        
+        // Добавляем поиск
+        const searchInput = document.getElementById('searchUsers');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                const query = e.target.value.toLowerCase();
+                document.querySelectorAll('.user-item').forEach(el => {
+                    const name = el.querySelector('span').textContent.toLowerCase();
+                    el.style.display = name.includes(query) ? 'flex' : 'none';
+                });
+            });
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки пользователей:', error);
+        document.getElementById('usersList').innerHTML = '<div style="padding: 20px; text-align: center; color: #e84a5f;">❌ Ошибка загрузки пользователей</div>';
+    }
+}
+
+// Открытие чата с пользователем
+async function openChat(username) {
+    activeChat = username;
+    
+    // Обновляем UI
+    document.querySelectorAll('.user-item').forEach(el => {
+        el.classList.remove('active');
+        if (el.dataset.username === username) {
+            el.classList.add('active');
+            el.style.fontWeight = 'normal';
+        }
+    });
+    
+    document.getElementById('chatHeader').innerHTML = `<div class="chat-user">💬 ${escapeHtml(username)}</div>`;
+    document.querySelector('.message-input-area').style.display = 'flex';
+    
+    // Загружаем историю сообщений
+    const container = document.getElementById('messagesContainer');
+    container.innerHTML = '<div style="text-align: center; color: #6c7883;">📂 Загрузка сообщений...</div>';
+    
+    try {
+        const response = await fetch(`/api/messages/${currentUser.username}/${username}`);
+        const messages = await response.json();
+        
+        container.innerHTML = '';
+        
+        if (messages.length === 0) {
+            container.innerHTML = '<div style="text-align: center; color: #6c7883;">💬 Нет сообщений. Напишите что-нибудь!</div>';
+        }
+        
+        for (const msg of messages) {
+            try {
+                const encryptedContent = JSON.parse(msg.encrypted_content);
+                const iv = JSON.parse(msg.iv);
+                const decrypted = await decryptMessage(
+                    {
+                        encrypted: encryptedContent,
+                        iv: iv,
+                        salt: new Uint8Array(32)
+                    },
+                    currentUser.password
+                );
+                
+                const isOutgoing = msg.from_user === currentUser.username;
+                displayMessage(msg.from_user, decrypted, isOutgoing);
+            } catch (error) {
+                console.error('Ошибка расшифровки сообщения:', error);
+            }
+        }
+        
+        container.scrollTop = container.scrollHeight;
+    } catch (error) {
+        console.error('Ошибка загрузки истории:', error);
+        container.innerHTML = '<div style="text-align: center; color: #e84a5f;">❌ Ошибка загрузки сообщений</div>';
+    }
+}
+
+// Отображение сообщения
+function displayMessage(from, text, isOutgoing) {
+    const container = document.getElementById('messagesContainer');
+    
+    // Убираем заглушку если она есть
+    if (container.children.length === 1 && container.children[0].textContent.includes('Нет сообщений')) {
+        container.innerHTML = '';
+    }
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${isOutgoing ? 'outgoing' : 'incoming'}`;
+    messageDiv.innerHTML = `
+        <div>${escapeHtml(text)}</div>
+        <div class="message-info">${isOutgoing ? 'Вы' : from} • ${new Date().toLocaleTimeString()}</div>
+    `;
+    container.appendChild(messageDiv);
+    container.scrollTop = container.scrollHeight;
+}
+
+// Отправка сообщения
+document.getElementById('sendBtn').addEventListener('click', async () => {
+    if (!activeChat) {
+        alert('Выберите пользователя для чата');
+        return;
+    }
+    
+    const input = document.getElementById('messageInput');
+    const text = input.value.trim();
+    if (!text) return;
+    
+    // Шифруем сообщение
+    const salt = window.crypto.getRandomValues(new Uint8Array(32));
+    const encrypted = await encryptMessage(text, currentUser.password, salt);
+    
+    // Отправляем на сервер
+    socket.emit('private-message', {
+        to: activeChat,
+        from: currentUser.username,
+        encryptedContent: encrypted.encrypted,
+        iv: encrypted.iv
+    });
+    
+    // Показываем у себя
+    displayMessage(currentUser.username, text, true);
+    
+    input.value = '';
+});
+
+// Обновление статуса пользователя
+function updateUserStatus(username, isOnline) {
+    const userItem = document.querySelector(`.user-item[data-username="${username}"]`);
+    if (userItem) {
+        const statusDiv = userItem.querySelector('.user-status');
+        if (isOnline) {
+            statusDiv.classList.add('online');
+        } else {
+            statusDiv.classList.remove('online');
+        }
+    }
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// Выход
+document.getElementById('logoutBtn').addEventListener('click', () => {
+    if (socket) {
+        socket.disconnect();
+    }
+    currentUser = null;
+    activeChat = null;
+    document.getElementById('authScreen').style.display = 'flex';
+    document.getElementById('messengerScreen').style.display = 'none';
+    document.getElementById('loginUsername').value = '';
+    document.getElementById('loginPassword').value = '';
+    document.getElementById('usersList').innerHTML = '';
+    document.getElementById('messagesContainer').innerHTML = '';
+});
+
+// Переключение табов
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab;
+        
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        document.querySelectorAll('.auth-form').forEach(form => form.classList.remove('active'));
+        document.getElementById(`${tab}Form`).classList.add('active');
+        
+        // Очищаем ошибки
+        document.getElementById('loginError').textContent = '';
+        document.getElementById('regError').textContent = '';
+    });
+});    const encrypted = await window.crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        encoder.encode(message)
+    );
+    
+    return {
+        encrypted: Array.from(new Uint8Array(encrypted)),
+        iv: Array.from(iv),
+        salt: Array.from(salt)
+    };
+}
+
+async function decryptMessage(encryptedData, password) {
+    const decoder = new TextDecoder();
+    const key = await deriveKey(password, new Uint8Array(encryptedData.salt));
+    
+    const decrypted = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: new Uint8Array(encryptedData.iv) },
+        key,
+        new Uint8Array(encryptedData.encrypted)
+    );
+    
+    return decoder.decode(decrypted);
+}
+
 // Генерация ключа из пароля (для шифрования сообщений)
 function generateChatKey(password) {
     // Используем пароль как основу для шифрования
