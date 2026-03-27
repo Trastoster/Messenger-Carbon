@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Private Messenger | Конфиденциальный мессенджер</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- ЭКРАН АВТОРИЗАЦИИ -->
+        <div id="authScreen" class="auth-screen">
+            <div class="auth-card">
+                <h1>🔒 Private Messenger</h1>
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="login">Вход</button>
+                    <button class="tab-btn" data-tab="register">Регистрация</button>
+                </div>
+                
+                <!-- Форма входа -->
+                <form id="loginForm" class="auth-form active">
+                    <input type="text" id="loginUsername" placeholder="Имя пользователя" required>
+                    <input type="password" id="loginPassword" placeholder="Пароль" required>
+                    <button type="submit">Войти</button>
+                    <div class="error-msg" id="loginError"></div>
+                </form>
+                
+                <!-- Форма регистрации -->
+                <form id="registerForm" class="auth-form">
+                    <input type="text" id="regUsername" placeholder="Имя пользователя" required>
+                    <input type="password" id="regPassword" placeholder="Пароль" required>
+                    <input type="password" id="regConfirmPassword" placeholder="Подтвердите пароль" required>
+                    <button type="submit">Зарегистрироваться</button>
+                    <div class="error-msg" id="regError"></div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- ОСНОВНОЙ ИНТЕРФЕЙС МЕССЕНДЖЕРА -->
+        <div id="messengerScreen" class="messenger-screen" style="display: none;">
+            <div class="sidebar">
+                <div class="user-info">
+                    <div class="avatar">👤</div>
+                    <div class="username" id="currentUsername"></div>
+                    <button id="logoutBtn" class="logout-btn">🚪</button>
+                </div>
+                <div class="search-box">
+                    <input type="text" id="searchUsers" placeholder="Поиск...">
+                </div>
+                <div class="users-list" id="usersList">
+                    <!-- Список пользователей будет здесь -->
+                </div>
+            </div>
+            
+            <div class="chat-area">
+                <div class="chat-header" id="chatHeader">
+                    <div class="chat-user">Выберите чат</div>
+                </div>
+                <div class="messages-container" id="messagesContainer">
+                    <div class="empty-chat">👈 Выберите пользователя для начала общения</div>
+                </div>
+                <div class="message-input-area" style="display: none;">
+                    <textarea id="messageInput" placeholder="Сообщение..." rows="3"></textarea>
+                    <button id="sendBtn">📤 Отправить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+</body>
+  </html>
